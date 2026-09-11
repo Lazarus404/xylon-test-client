@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>DC send repro</title>
+  </head>
+  <body>
+    <pre id="out">idle</pre>
+    <script type="module">
+      import { XylonRoom, waitDataChannelOpen } from "xylon-client-sdk";
+
+      const out = document.getElementById("out");
+      const log = (m) => {
+        out.textContent += "\n" + m;
+        console.log(m);
+      };
+
+      const params = new URLSearchParams(location.search);
+      const token = params.get("token");
+      const participantId = params.get("p") || "a";
+      const sessionId = params.get("session") || "room-probe";
+      const send = params.get("send") === "1";
+
+      if (!token) {
+        log("missing token");
+        throw new Error("token");
+      }
+
+      const room = new XylonRoom();
+      window.__room = room;
+      await room.connect({
+        wsUrl: `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/v1/ws`,
+        token,
+        tenantId: "acme",
+        sessionId,
+        participantId,
+        library: "datachannel",
+        dataChannelLabels: ["chat"],
+        backendOpts: { mode: "fanout_except_sender", default_label: "chat" }
+      });
+      const dc = room.dataChannel("chat");
+      window.__pc = room.peerConnection;
+      window.__dc = dc;
+      await waitDataChannelOpen(dc, 20000);
+      log(`open ice=${room.peerConnection.iceConnectionState} dc=${dc.readyState}`);
+      window.__ready = true;
+
+      if (send) {
+        const before = dc.bufferedAmount;
+        dc.send("Hello");
+        log(`sent buffered ${before}->${dc.bufferedAmount}`);
+      }
+    </script>
+  </body>
+</html>

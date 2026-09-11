@@ -1,0 +1,181 @@
+:root {
+  --xylon-bg0: #0f1412;
+  --xylon-bg1: #1a2420;
+  --xylon-surface: #f4f7f5;
+  --xylon-ink: #14201b;
+  --xylon-muted: #5a6b63;
+  --strike-ink: var(--xylon-ink);
+  --strike-muted: var(--xylon-muted);
+  --strike-fill: #e8efeb;
+  --strike-line: #c5d2cb;
+  --strike-accent: #0b6e4f;
+  --strike-radius: 8px;
+  --font-display: "Fraunces", Georgia, serif;
+  --font-ui: "Sora", "Segoe UI", sans-serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  font-family: var(--font-ui);
+  color: var(--xylon-ink);
+  background:
+    radial-gradient(1200px 600px at 10% -10%, #1f3d32 0%, transparent 55%),
+    radial-gradient(900px 500px at 100% 0%, #0b6e4f33 0%, transparent 50%),
+    linear-gradient(165deg, var(--xylon-bg0), var(--xylon-bg1) 45%, #121a17);
+}
+
+#app {
+  min-height: 100vh;
+}
+
+.xylon-shell {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1.25rem 1.25rem 3rem;
+  animation: xylon-rise 0.55s ease-out both;
+}
+
+@keyframes xylon-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.xylon-shell .strike-appbar {
+  background: color-mix(in srgb, #fff 92%, #0b6e4f 8%);
+  border-radius: 12px;
+  border: 1px solid color-mix(in srgb, #fff 20%, transparent);
+  margin-bottom: 1.25rem;
+  backdrop-filter: blur(8px);
+}
+
+.xylon-brand {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.xylon-brand-mark {
+  display: inline-block;
+  width: 0.55rem;
+  height: 0.55rem;
+  margin-right: 0.45rem;
+  border-radius: 2px;
+  background: var(--strike-accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--strike-accent) 28%, transparent);
+  vertical-align: middle;
+  animation: xylon-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes xylon-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--strike-accent) 28%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 0 5px color-mix(in srgb, var(--strike-accent) 12%, transparent);
+  }
+}
+
+.xylon-tagline {
+  color: var(--strike-muted);
+  font-size: 0.85rem;
+  margin: 0;
+}
+
+.xylon-main {
+  background: var(--xylon-surface);
+  border-radius: 14px;
+  padding: 1.15rem 1.25rem 1.5rem;
+  border: 1px solid color-mix(in srgb, #fff 35%, var(--strike-line));
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+  animation: xylon-fade 0.45s ease 0.08s both;
+}
+
+@keyframes xylon-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.xylon-main .strike-tabs__list {
+  border-bottom-color: var(--strike-line);
+  gap: 0.15rem;
+}
+
+.xylon-panel-grid {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.xylon-panel-grid--2 {
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+}
+
+.xylon-log {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  background: #121a17;
+  color: #d7e4dd;
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  min-height: 9rem;
+  max-height: 16rem;
+  overflow: auto;
+  margin: 0;
+}
+
+.xylon-media {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+  gap: 0.75rem;
+}
+
+.xylon-media video {
+  width: 100%;
+  aspect-ratio: 16 / 10;
+  background: #0a100e;
+  border-radius: 8px;
+  border: 1px solid var(--strike-line);
+}
+
+.xylon-status {
+  margin-top: 1rem;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+
+.xylon-hint {
+  font-size: 0.82rem;
+  color: var(--strike-muted);
+  margin: 0 0 0.75rem;
+}
+
+@media (max-width: 640px) {
+  .xylon-shell {
+    padding: 0.85rem 0.85rem 2rem;
+  }
+
+  .xylon-main {
+    padding: 0.9rem;
+  }
+}

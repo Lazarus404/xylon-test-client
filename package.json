@@ -1,0 +1,20 @@
+{
+  "name": "xylon-test-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "test": "node --test src/media_constraints.test.js src/dc_room.test.js src/admin_client.test.js src/conference_backend_opts.test.js"
+  },
+  "dependencies": {
+    "sip.js": "^0.21.2",
+    "strike-fw": "^0.2.2",
+    "strike-fw-ui": "^0.2.2",
+    "xylon-client-sdk": "file:../xylon-client-sdk"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
