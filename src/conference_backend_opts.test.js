@@ -13,7 +13,8 @@ describe("conferenceBackendOpts", () => {
     assert.deepEqual(conferenceBackendOpts("mcu"), {
       audio: "mcu",
       video: "sfu",
-      subscribe_mode: "mesh"
+      subscribe_mode: "mesh",
+      audio_level_average: 127
     });
   });
 
@@ -22,6 +23,7 @@ describe("conferenceBackendOpts", () => {
       audio: "mcu",
       video: "sfu",
       subscribe_mode: "mesh",
+      audio_level_average: 127,
       mcu_cascade: "hub"
     });
   });
@@ -54,6 +56,7 @@ describe("conferenceBackendOpts", () => {
         audio: "mcu",
         video: "sfu",
         subscribe_mode: "mesh",
+        audio_level_average: 127,
         mcu_cascade: "hub",
         mcu_cascade_trunk_profile: "pcm",
         mcu_spoke_mix_minus: true

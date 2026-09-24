@@ -31,7 +31,10 @@ export function conferenceBackendOpts(audioMode, mcuCascade = "", extra = {}) {
     const opts = {
       audio: "mcu",
       video: "sfu",
-      subscribe_mode: "mesh"
+      subscribe_mode: "mesh",
+      // Include all decoded contributors (fake Chrome mic / oscillator often
+      // looks "quiet" under the default 25 gate).
+      audio_level_average: 127
     };
     if (mcuCascade === "hub") {
       opts.mcu_cascade = "hub";

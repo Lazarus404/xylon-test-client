@@ -8,10 +8,14 @@ Tabs:
 
 - **Control WS** -- `XylonRoom` (mint via SDK `AdminClient`, paste token, or lab
   tenant/session); `backend_opts` on the WS `join` frame (datachannel: mode/label;
-  conference: `subscribe_mode: manual`)
+  conference: `subscribe_mode: manual`). Dest checkboxes from presence;
+  `room.send(..., { dest })`; groups snapshot/diff + Control REST create/add +
+  `resolveDest` send (Bearer / Mint-Paste).
 - **Admin** -- Control admin REST via `AdminClient` -> demo admin -> platform
   interface -> Xylon (never Xylon `/v1/tenants/...` from the browser)
-- **HTTP Lab** -- classic POST create/offer (control off / `x-tenant-id`)
+- **HTTP Lab** -- classic POST create/offer; Auth Mint (HMAC via demo admin) or
+  Off (`x-tenant-id` for `--control lab`); MFU
+  RPC unicast / `*` / id-list buttons
 - **SIP Echo** -- SIP.js REGISTER + INVITE
 
 ## Setup
@@ -83,14 +87,44 @@ From the workspace root, start everything:
 ```
 
 That boots store `:8091`, interface `:8093` (seeds `acme`, writes `.lab/admin.json`),
-admin `:8092`, Xylon `:8080` with `XYLON_CONTROL_SECRETS_URL`, and Vite `:5173`.
+admin `:8092`, Xylon `:8080` via `mix xylon.conference --control hmac` (echo +
+datachannel + conference, `XYLON_CONTROL_SECRETS_URL`), and Vite `:5173`.
 See [XYLON_ADMIN_ARCHITECTURE.md](../XYLON_ADMIN_ARCHITECTURE.md) section 11 for the
 manual topology.
 
-1. Tab **Control WS**, auth mode **Mint**, tenant `acme`, session `room-1`
-2. Connect (`AdminClient.mintToken` -> demo admin `POST /v1/token`)
-3. Second browser tab, participant `b`, same session; send chat
-4. Tab **Admin** -> Presence to verify roster via the admin path
+1. Prefer Vite client `http://127.0.0.1:5173/client/` (live); `:8080/` serves a static
+   copy and may lag until `npm run build` in `xylon-test-client`
+2. Tab **HTTP Lab** or **Control WS**: Auth **Mint**, tenant `acme`, session `room-1`
+3. Connect (`AdminClient.mintToken` -> demo admin `POST /v1/token` on `:8092`)
+4. Second browser tab, participant `b`, same session; send chat / A/V
+5. Tab **Admin** -> Presence to verify roster via the admin path
+
+HTTP Lab Auth **Off** is only for `--control lab` / control disabled (no Bearer).
+With `./start.sh` (`--control hmac`), Mint is required on both HTTP Lab and Control WS.
+
+### Phase 14 checklist (dest / groups / RPC)
+
+**Dest (three tabs, Control WS, same session):**
+
+1. Connect participants `a`, `b`, `c` (Mint or Lab with `--control lab` / hmac)
+2. On `a`, check only `b` under Dest; send a chat JSON message
+3. `b` log shows recv; `c` does not
+
+**Groups (Lab under `--control lab`; Mint/Paste Bearer for `--control hmac`):**
+
+1. Create group id (e.g. `breakout`); Add member `b`
+2. Confirm groups snapshot/diff in the log / list
+3. Send to group from `a` -- only members receive (never put group name on envelope)
+
+**RPC broadcast (HTTP Lab, mode `mfu`, two tabs):**
+
+1. Connect `a` and `b` with `rpc_router`
+2. **RPC unicast** to peer id; **RPC \***; **RPC list** with `b,c` (or `b`)
+3. Confirm first-responder / inbound log lines
+
+Playwright checklist coverage: `./scripts/e2e-phase14.sh` (builds client, boots
+`mix xylon.datachannel --control lab`, runs `@phase14` on Chrome). Specs under
+`e2e/specs/datachannel_phase14_*.spec.mjs` (dest UI, groups, HTTP Lab RPC).
 
 Auth modes:
 
@@ -110,7 +144,10 @@ Auth mode **Lab**, tenant `lab`, unique participant ids.
 
 ## HTTP Lab
 
-Control disabled / `auth: :lab`. Prefer the multi-library boot:
+With `./start.sh` (`--control hmac`): Auth **Mint**, tenant `acme`, admin `:8092`.
+
+Standalone control disabled / `auth: :lab`: Auth **Off**, tenant `lab`. Prefer the
+multi-library boot:
 
 ```bash
 cd ../xylon-test-client && npm run build
@@ -125,15 +162,16 @@ Presence are required:
 XYLON_ADVERTISED_IP=127.0.0.1 XTURN_LOCAL_DEPS=1 mix xylon.conference --http-port 8080 --control hmac
 ```
 
-Then use the **Control WS** tab (or HTTP create + Control join). Frame shapes and
-subscribe curl: [xylon-conference-backend README](https://github.com/Lazarus404/xylon_conference_backend)
+Then use **HTTP Lab** or **Control WS** with Auth **Mint** (tenant `acme` when
+using the secrets-store lab). Frame shapes and subscribe curl:
+[xylon-conference-backend README](https://github.com/Lazarus404/xylon_conference_backend)
 "App path (manual)".
 
-Open http://127.0.0.1:8080/client/ **HTTP Lab**:
+Open http://127.0.0.1:5173/client/ (or a rebuilt `:8080/client/`) **HTTP Lab**:
 
 | Library | Two tabs (same session, unique participant ids) |
 | --- | --- |
-| `datachannel` + mode `mfu` | Opens `chat` / `rpc` / `state` with `rpc_router` + `state_coalesce`. Chat Send; **RPC ping**; 10 Hz transform ticks (state ok/drop counters). |
+| `datachannel` + mode `mfu` | Opens `chat` / `rpc` / `state` with `rpc_router` + `state_coalesce`. Chat Send; **RPC unicast / \* / list**; 10 Hz transform ticks (state ok/drop counters). |
 | `datachannel` + opaque mode | Single DC label fanout |
 | `conference` | A/V SFU; create/join sends `subscribe_mode: manual`. Lab does **not** auto-subscribe on feeds -- call WS/HTTP subscribe yourself until a future UI wires it. Mesh only if the session was created without those opts. |
 | `echo` | A/V loopback |

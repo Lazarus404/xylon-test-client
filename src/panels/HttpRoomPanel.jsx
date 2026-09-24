@@ -10,25 +10,36 @@ import {
   StateReceiver,
   createRpcClient
 } from "xylon-client-sdk";
+import {
+  DEFAULT_ADMIN_URL,
+  createAdminClient,
+  mintToken
+} from "../admin_client.js";
 import { conferenceBackendOpts } from "../conference_backend_opts.js";
 import {
   ensureSession,
   formatLogLine,
   leaveParticipant,
   postOffer,
-  waitIceComplete
+  waitIceComplete,
+  waitIceConnected
 } from "../dc_room.js";
 import { resolveMediaPlan } from "../media_constraints.js";
+import { formatStatsLine, sampleInboundStats } from "../webrtc_stats.js";
 
 /**
- * HTTP JSEP lab: datachannel chat + RPC, or conference/echo A/V (control off / x-tenant-id).
+ * HTTP JSEP lab: datachannel chat + RPC, or conference/echo A/V.
+ * Auth Mint uses demo admin POST /v1/token (HMAC lab via ./start.sh);
+ * Off is x-tenant-id only (--control lab / control disabled).
  * @param {{ onStatus: (msg: string, tone?: string) => void }} props
  */
 export function HttpRoomPanel({ onStatus }) {
   const [baseUrl, setBaseUrl] = useState(
     `${location.protocol}//${location.host}`
   );
-  const [tenantId, setTenantId] = useState("lab");
+  const [authMode, setAuthMode] = useState("mint");
+  const [adminUrl, setAdminUrl] = useState(DEFAULT_ADMIN_URL);
+  const [tenantId, setTenantId] = useState("acme");
   const [sessionId, setSessionId] = useState("room-1");
   const [participantId, setParticipantId] = useState("a");
   const [library, setLibrary] = useState("datachannel");
@@ -60,6 +71,51 @@ export function HttpRoomPanel({ onStatus }) {
   const localVideoRef = useRef(null);
   const remoteVideoRef = useRef(null);
   const remoteAudioRef = useRef(null);
+  const authTokenRef = useRef("");
+  const statsTimerRef = useRef(null);
+
+  function stopStats() {
+    if (statsTimerRef.current) {
+      clearInterval(statsTimerRef.current);
+      statsTimerRef.current = null;
+    }
+  }
+
+  function startStats(pc) {
+    stopStats();
+    statsTimerRef.current = setInterval(() => {
+      sampleInboundStats(pc)
+        .then((sample) => appendLog("stats", formatStatsLine(sample)))
+        .catch(() => {});
+    }, 2000);
+  }
+
+  function onAuthModeChange(next) {
+    setAuthMode(next);
+    if (next === "off") {
+      setTenantId((t) => (t === "acme" ? "lab" : t));
+    } else {
+      setTenantId((t) => (t === "lab" ? "acme" : t));
+    }
+  }
+
+  /**
+   * @returns {Promise<string | undefined>}
+   */
+  async function resolveToken() {
+    if (authMode !== "mint") {
+      authTokenRef.current = "";
+      return undefined;
+    }
+    const admin = createAdminClient(adminUrl.trim() || DEFAULT_ADMIN_URL);
+    const tok = await mintToken(admin, {
+      sessionId: sessionId.trim(),
+      participantId: participantId.trim()
+    });
+    authTokenRef.current = tok;
+    appendLog("info", "minted bearer via admin");
+    return tok;
+  }
 
   const isDc = library === "datachannel";
   const isAv = library === "conference" || library === "echo";
@@ -89,8 +145,9 @@ export function HttpRoomPanel({ onStatus }) {
 
   /**
    * @param {string[]} labels
+   * @param {string} [token]
    */
-  async function connectDatachannel(labels) {
+  async function connectDatachannel(labels, token) {
     const roomPc = new RTCPeerConnection({ iceServers: [] });
     pcRef.current = roomPc;
     channelsRef.current = {};
@@ -131,7 +188,8 @@ export function HttpRoomPanel({ onStatus }) {
       tenantId: tenantId.trim(),
       sessionId: sessionId.trim(),
       participantId: participantId.trim(),
-      offerSdp: roomPc.localDescription.sdp
+      offerSdp: roomPc.localDescription.sdp,
+      token
     });
     await roomPc.setRemoteDescription({ type: "answer", sdp: answerSdp });
     appendLog("info", `offer ok as ${participantId}`);
@@ -150,13 +208,30 @@ export function HttpRoomPanel({ onStatus }) {
         localParticipantId: localId,
         getChannel: (lbl) => channelsRef.current[lbl] || null
       });
-      rpc.registerRpcMethod("ping", (payload) => ({
-        pong: true,
-        echo: payload,
-        from: localId
-      }));
+      rpc.registerRpcMethod("ping", (payload) => {
+        try {
+          if (typeof window !== "undefined") {
+            window.__e2eRpcHandled = window.__e2eRpcHandled || [];
+            window.__e2eRpcHandled.push({
+              method: "ping",
+              from: localId,
+              payload
+            });
+          }
+        } catch (_) {}
+        return {
+          pong: true,
+          echo: payload,
+          from: localId
+        };
+      });
       rpcRef.current = rpc;
       appendLog("info", "rpc client ready (ping)");
+      try {
+        if (typeof window !== "undefined") {
+          window.__e2eRpcHandled = window.__e2eRpcHandled || [];
+        }
+      } catch (_) {}
     } catch (err) {
       appendLog("info", `rpc setup: ${String(err && err.message ? err.message : err)}`);
     }
@@ -221,11 +296,23 @@ export function HttpRoomPanel({ onStatus }) {
     }
   }
 
-  async function connectAv() {
+  /**
+   * @param {string} [token]
+   */
+  async function connectAv(token) {
     const plan = resolveMediaPlan({ audio, video, datachannel: false });
     const roomPc = new RTCPeerConnection({ iceServers: [] });
     pcRef.current = roomPc;
     roomPc.ontrack = attachRemoteTrack;
+    roomPc.oniceconnectionstatechange = () => {
+      appendLog("info", `ice ${roomPc.iceConnectionState}`);
+      if (roomPc.iceConnectionState === "failed") {
+        onStatus("ICE failed", "danger");
+      }
+    };
+    roomPc.onconnectionstatechange = () => {
+      appendLog("info", `pc ${roomPc.connectionState}`);
+    };
 
     const stream = await navigator.mediaDevices.getUserMedia(plan.getUserMedia);
     localStreamRef.current = stream;
@@ -247,11 +334,20 @@ export function HttpRoomPanel({ onStatus }) {
       tenantId: tenantId.trim(),
       sessionId: sessionId.trim(),
       participantId: participantId.trim(),
-      offerSdp: roomPc.localDescription.sdp
+      offerSdp: roomPc.localDescription.sdp,
+      token
     });
     await roomPc.setRemoteDescription({ type: "answer", sdp: answerSdp });
+    const cands = (answerSdp.match(/^a=candidate:.+$/gm) || []).slice(0, 4);
+    appendLog(
+      "info",
+      `answer candidates ${cands.length ? cands.join(" | ") : "(none)"}`
+    );
     appendLog("info", `A/V offer ok as ${participantId} library=${library}`);
+    onStatus("ICE connecting...", "info");
+    await waitIceConnected(roomPc);
     setRoomUi(true, false);
+    startStats(roomPc);
     onStatus(`${library} room connected`, "ok");
   }
 
@@ -261,6 +357,13 @@ export function HttpRoomPanel({ onStatus }) {
       if (!participantId.trim()) throw new Error("participant id required");
       const lib = library.trim() || "datachannel";
       const lbl = label.trim() || "chat";
+      const tid = tenantId.trim() || (authMode === "mint" ? "acme" : "lab");
+
+      onStatus(
+        authMode === "mint" ? "minting token..." : "creating/joining session...",
+        "info"
+      );
+      const token = await resolveToken();
 
       onStatus("creating/joining session...", "info");
       /** @type {Record<string, unknown> | undefined} */
@@ -286,10 +389,11 @@ export function HttpRoomPanel({ onStatus }) {
       }
       const { created } = await ensureSession({
         baseUrl: baseUrl.trim(),
-        tenantId: tenantId.trim(),
+        tenantId: tid,
         sessionId: sessionId.trim(),
         library: lib,
-        backendOpts
+        backendOpts,
+        token
       });
       appendLog(
         "info",
@@ -299,9 +403,9 @@ export function HttpRoomPanel({ onStatus }) {
       if (lib === "datachannel") {
         const labels =
           mode === "mfu" ? [...GAME_DATA_CHANNEL_LABELS] : [lbl];
-        await connectDatachannel(labels);
+        await connectDatachannel(labels, token);
       } else {
-        await connectAv();
+        await connectAv(token);
       }
     } catch (err) {
       console.error("[xylon-client]", err);
@@ -320,9 +424,12 @@ export function HttpRoomPanel({ onStatus }) {
         baseUrl: baseUrl.trim(),
         tenantId: tenantId.trim(),
         sessionId: sessionId.trim(),
-        participantId: participantId.trim()
+        participantId: participantId.trim(),
+        token: authTokenRef.current || undefined
       });
     } catch (_) {}
+    authTokenRef.current = "";
+    stopStats();
     try {
       if (rpcRef.current) {
         rpcRef.current.close();
@@ -377,27 +484,46 @@ export function HttpRoomPanel({ onStatus }) {
   }
 
   async function onRpcPing() {
+    await runRpc(rpcPeer.trim(), "unicast");
+  }
+
+  async function onRpcBroadcast() {
+    await runRpc("*", "broadcast *");
+  }
+
+  async function onRpcMulticast() {
+    const ids = rpcPeer
+      .split(/[\s,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (ids.length < 1) {
+      onStatus("rpc peer id list required (comma-separated)", "warn");
+      return;
+    }
+    await runRpc(ids, `multicast [${ids.join(",")}]`);
+  }
+
+  async function runRpc(destination, label) {
     const rpc = rpcRef.current;
     if (!rpc) {
       onStatus("rpc not ready", "warn");
       return;
     }
-    const peer = rpcPeer.trim();
-    if (!peer) {
-      onStatus("rpc peer id required", "warn");
+    if (destination === "" || (Array.isArray(destination) && destination.length === 0)) {
+      onStatus("rpc destination required", "warn");
       return;
     }
     const t0 = performance.now();
     try {
-      const result = await rpc.performRpc(peer, "ping", { t: Date.now() }, {
+      const result = await rpc.performRpc(destination, "ping", { t: Date.now() }, {
         timeoutMs: 5000
       });
       const ms = Math.round(performance.now() - t0);
-      appendLog("rpc", `ping -> ${peer} ${ms}ms ${JSON.stringify(result)}`);
+      appendLog("rpc", `ping ${label} ${ms}ms ${JSON.stringify(result)}`);
       onStatus(`rpc ok ${ms}ms`, "ok");
     } catch (err) {
       const text = String(err && err.message ? err.message : err);
-      appendLog("rpc", `ping failed: ${text}`);
+      appendLog("rpc", `ping ${label} failed: ${text}`);
       onStatus(text, "danger");
     }
   }
@@ -406,13 +532,16 @@ export function HttpRoomPanel({ onStatus }) {
     <Card
       outlined
       title="HTTP Lab"
-      subtitle="POST /v1/sessions + offer · control off / x-tenant-id."
+      subtitle="POST /v1/sessions + offer · Mint bearer (HMAC) or Off (lab)."
     >
       <Stack gap={12}>
         <Text as="p" class="xylon-hint">
-          Unique participant per tab. Datachannel mode <code>mfu</code> opens
-          chat/rpc/state with <code>rpc_router</code> + <code>state_coalesce</code>
-          (RPC ping + 10 Hz transform ticks). Opaque modes use a single DC label.
+          Unique participant per tab. With <code>./start.sh</code> use Auth{" "}
+          <code>Mint</code>, tenant <code>acme</code>, admin{" "}
+          <code>:8092</code>. Auth <code>Off</code> is for{" "}
+          <code>--control lab</code> / control disabled. Datachannel mode{" "}
+          <code>mfu</code> opens chat/rpc/state with <code>rpc_router</code> +{" "}
+          <code>state_coalesce</code>.
         </Text>
         <Field
           label="Base URL"
@@ -420,6 +549,23 @@ export function HttpRoomPanel({ onStatus }) {
           onInput={(e) => setBaseUrl(e.target.value)}
         />
         <div class="xylon-panel-grid xylon-panel-grid--2">
+          <Select
+            label="Auth mode"
+            value={authMode}
+            onChange={(e) => onAuthModeChange(e.target.value)}
+            options={[
+              { value: "mint", label: "Mint (admin token)" },
+              { value: "off", label: "Off (x-tenant-id only)" }
+            ]}
+          />
+          {authMode === "mint" ? (
+            <Field
+              label="Admin URL"
+              value={adminUrl}
+              onInput={(e) => setAdminUrl(e.target.value)}
+              placeholder={DEFAULT_ADMIN_URL}
+            />
+          ) : null}
           <Field
             label="Tenant"
             value={tenantId}
@@ -571,13 +717,20 @@ export function HttpRoomPanel({ onStatus }) {
         {isGameMfu ? (
           <Stack row gap={8}>
             <Field
-              label="RPC peer id"
+              label="RPC peer id(s)"
               value={rpcPeer}
               onInput={(e) => setRpcPeer(e.target.value)}
               disabled={!dcReady}
+              placeholder="b or b,c"
             />
             <Btn type="button" disabled={!dcReady} onClick={onRpcPing}>
-              RPC ping
+              RPC unicast
+            </Btn>
+            <Btn type="button" disabled={!dcReady} onClick={onRpcBroadcast}>
+              RPC *
+            </Btn>
+            <Btn type="button" disabled={!dcReady} onClick={onRpcMulticast}>
+              RPC list
             </Btn>
             <Text as="span" class="xylon-hint">
               state ok={stateAccepted} drop={stateDropped}
